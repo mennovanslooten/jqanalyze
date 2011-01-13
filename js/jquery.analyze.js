@@ -1,8 +1,8 @@
-(function( $, GLOBAL ) {
+(function( $ ) {
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
-    var _selector_analyzers = [];
     var _selectors = [];
+    var _selector_analyzers = [];
     var _event_analyzers = [];
     var _dom_analyzers = [];
 
@@ -124,17 +124,10 @@
      * Public Plugin Methods
      */
     $.analyze = {
-        addDOMAnalyzer : function(selector, message) {
-            function analyzer() {
-                if ($(selector).length) {
-                    console.warn('DOM warning:"', selector, '"');
-                    console.log(message);
-                }
-            }
-
+        addDOMAnalyzer : function(analyzer) {
             _dom_analyzers.push(analyzer);
             return this;
-        },
+        }, 
 
         addSelectorAnalyzer : function(analyzer) {
             _selector_analyzers.push(analyzer);
@@ -144,6 +137,15 @@
         addEventAnalyzer : function(analyzer) {
             _event_analyzers.push(analyzer);
             return this;
+        },
+
+        warn : function(warning, moreinfo) {
+            console.group(warning);
+            //console.warn.call(console, warning);
+            if (moreinfo) {
+                console.log(moreinfo);
+            }
+            console.groupEnd();
         }
     };
 
@@ -156,17 +158,16 @@
  * DEFAULT ANALYZERS
  * ################################################################ */
 (function($) {
+    /*
+     * This method is used for some generic, regular-expression based selector
+     * testing.
+     */
     $.analyze.addSelectorRegexp = function(rx, message) {
 
         function analyzer(selector) {
             var matches = selector.match(rx);
             if (matches) {
-                console.warn('Selector warning:"', selector, '"');
-                if ($.isFunction(message)) {
-                    message(matches);
-                } else {
-                    console.log(message);
-                }
+                $.analyze.warn('Selector warning:"' + selector + '"', selector.replace(rx, message));
             }
         }
 
@@ -179,15 +180,15 @@
 
     $.analyze.addSelectorRegexp(/^#[\w]+ #[\w]+/, 'Don\'t nest ID selectors');
 
-    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, function(matches) {
-        //console.log('Don\'t follow ID selectors with other selectors. Use $("', matches[1], '").find("', matches[2], '") instead');
-        console.log('Don\'t follow ID selectors with other selectors. Use $("%s").find("%s") instead', matches[1], matches[2]);
-    });
+    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use $("$1").find("$2") instead');
 
-    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, function(matches) {
-        console.log('Don\'t follow ID selectors with other selectors. Use $("%s").children("%s") instead', matches[1], matches[2]);
-    });
+    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use $("$1").children("$2") instead');
 
+
+    /*
+     * This analyzer tests if a selector is used multiple times in a row and
+     * yields similar results. If so, suggest storing the result in a variable.
+     */
     var _used_selectors = [];
     $.analyze.addSelectorAnalyzer(function(selector, result, d1, d2) {
         _used_selectors.push({
@@ -198,16 +199,32 @@
         if (length > 1) {
             var prev = _used_selectors[length - 2];
             if (prev.selector ===  selector && prev.results === result.length) {
-                console.warn('Selector warning:"%s" used multiple times in a row. Consider caching', selector);
+                $.analyze.warn('Selector warning:"' + selector + '" used multiple times in a row.', 'If you use a selector multiple times in a row, you are probably better off storing it in a variable');
             }
         }
     });
 
+
+    /*
+     * This analyzer tests if an event is bound to multiple elements and if so,
+     * suggest delegation.
+     */
     $.analyze.addEventAnalyzer(function(type, result, d1, d2) {
         if (result.length > 2) {
-            console.warn('Event warning: Consider using delegate for "', type, '" on ', result);
+            $.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A "' + type + '" handler was bound to $("' + result.selector + '") which returned ' + result.length + ' results. Events bound to multiple similar elements can sometimes be optimized with event delegation.');
+            //console.warn('Event warning: Consider using delegate for "', type, '" on ', result.selector);
         }
     });
 
-    $.analyze.addDOMAnalyzer('form :input[name=submit], form :input[id=submit]', 'Don\'t name a form element "submit"');
+
+    /*
+     * This analyzer tests is a form element exists with the name or id
+     * "submit".
+     */
+    $.analyze.addDOMAnalyzer(function() {
+        var baaaaad = $('form :input[name=submit], form :input[id=submit]');
+        if (baaaaad.length) {
+            $.analyze.warn('DOM warning: Don\'t name a form element "submit"', 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.');
+        }
+    });
 })(jQuery);
