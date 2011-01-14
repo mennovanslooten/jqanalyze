@@ -3,6 +3,7 @@
     //var _report = $('#jQA-Report');
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
+    var _orig_unbind = $.fn.unbind;
     var _selectors = [];
     var _selector_analyzers = [];
     var _event_analyzers = [];
@@ -42,6 +43,44 @@
     };
 
 
+    var _handler_wrappers = [];
+    function getHandlerWrapper(handler) {
+        if (typeof handler === 'undefined') {
+            return;
+        }
+
+        for (var i = 0; i < _handler_wrappers.length; i++) {
+            var item = _handler_wrappers[i];
+            if (item.orig === handler) {
+                return item.wrapper;
+            }
+        }
+
+        function wrapper(e) {
+            var d1 = new Date().valueOf();
+            var result = handler.apply(this, arguments);
+            var d2 = new Date().valueOf();
+            // TODO: Store timer data somewhere for another performance table
+            if (d2 - d1 > 1) {
+                console.log('executed event handler', e.type, 'in', (d2-d1), 'ms');
+            }
+            return result;
+        }
+
+        _handler_wrappers.push({
+            orig:handler,
+            wrapper:wrapper
+        });
+
+        return wrapper;
+    }
+
+
+    var _unbind_replacement = function(type, fn) {
+        return _orig_unbind.call(this, type, getHandlerWrapper(fn));
+    };
+
+
     var _bind_replacement = function(type, data, fn) {
         var d1 = new Date().valueOf();
         if ($.isFunction(data) || data === false) {
@@ -49,20 +88,7 @@
             data = undefined;
         }
 
-        // Wrap the event handler in a timer function
-        function handler() {
-            var d1 = new Date().valueOf();
-            var result = fn.apply(this, arguments);
-            var d2 = new Date().valueOf();
-            // TODO: Store timer data somewhere for another performance table
-            if (d2 - d1 > 1) {
-                console.log('executed event handler', type, 'in', (d2-d1), 'ms');
-            }
-            return result;
-        }
-
-        var result = _orig_bind.call(this, type, data, handler);
-        //var result = _orig_bind.call(this, type, data, fn);
+        var result = _orig_bind.call(this, type, data, getHandlerWrapper(fn));
         var d2 = new Date().valueOf();
 
         // Execute all event analyzers
@@ -104,12 +130,14 @@
 
 
     function enable() {
+        $.fn.unbind = _unbind_replacement;
         $.fn.bind = _bind_replacement;
         $.fn.find = _find_replacement;
     }
 
 
     function disable() {
+        $.fn.unbind = _orig_unbind;
         $.fn.bind = _orig_bind;
         $.fn.find = _orig_find;
     }
@@ -131,11 +159,13 @@
         var button = button_container.find('button');
         button.toggle(
             function() {
-                _report.hide();
+                //_report.hide();
+                _report.animate({right:'-470px'}, 'fast');
                 $(this).text('Show report');
             },
             function() {
-                _report.show();
+                //_report.show();
+                _report.animate({right:'0'}, 'fast');
                 $(this).text('Hide report');
             }
         );
@@ -277,7 +307,7 @@
             var matches = selector.match(rx);
             if (matches) {
                 if (matches.length > 1) {
-                    message = selector.replace(rx, message);
+                    message = matches[0].replace(rx, message);
                 }
                 $.analyze.warn('Selector warning: <code>' + selector + '</code>', message);
             }
@@ -286,15 +316,13 @@
         return $.analyze.addSelectorAnalyzer(analyzer);
     };
 
-    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow');
+    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow.');
 
-    $.analyze.addSelectorRegexp(/^[\w]+#[\w]+/, 'Don\'t add elements to ID selectors');
+    $.analyze.addSelectorRegexp(/^.+(#[\w]+)/, 'Don\'t nest ID selector in another selector. Use <code>$("$1")</code> instead.');
 
-    $.analyze.addSelectorRegexp(/^#[\w]+ #[\w]+/, 'Don\'t nest ID selectors');
+    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").find("$2")</code> instead.');
 
-    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").find("$2")</code> instead');
-
-    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").children("$2")</code> instead');
+    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").children("$2")</code> instead.');
 
 
     /*
@@ -323,7 +351,7 @@
      */
     $.analyze.addEventAnalyzer(function(type, result, d1, d2) {
         if (result.length > 2) {
-            $.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A "' + type + '" handler was bound to $("' + result.selector + '") which returned ' + result.length + ' results. Events bound to multiple similar elements can sometimes be optimized with event delegation.');
+            $.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.');
         }
     });
 
