@@ -21,7 +21,8 @@
 }
 
 #jQA-Warnings,
-#jQA-Performance {
+#jQA-SelectorPerformance,
+#jQA-EventPerformance {
     position:absolute;
     border-left:1px solid #000;
     top:0;
@@ -29,27 +30,57 @@
     bottom:0;
     right:0;
     overflow:auto;
-}
-
-#jQA-Warnings {
-    bottom:50%;
+    border-top:1px solid rgba(255, 255, 255, 0.3);
     border-bottom:1px solid rgba(0, 0, 0, 0.3);
 }
 
-#jQA-Performance {
-    top:50%;
-    border-top:1px solid rgba(255, 255, 255, 0.3);
+#jQA-Warnings {
+    top:50px;
+    bottom:50%;
 }
 
-#jQA-Report-Button {
-    position:fixed;
-    right:10px;;
-    top:10px;
-    display:block;
-    width:auto;
-    left:auto;
-    z-index:1000;
+#jQA-SelectorPerformance {
+    top:50%;
+    bottom:25%;
 }
+
+#jQA-EventPerformance {
+    top:75%;
+}
+
+#jQA-CloseButton {
+    position:absolute;
+    left:20px;;
+    top:10px;
+    z-index:1000;
+    border-radius:5px;
+    -moz-border-radius:5px;
+    -webkit-border-radius:5px;
+    padding:5px;
+    border:1px solid #001465;
+    color:#FFF;
+    text-shadow:-1px -1px #001465;
+    cursor:pointer;
+    background: -webkit-gradient(linear, left top, left bottom, from(#3FD2FF), to(#000E55)); /* for webkit browsers */
+    background: -moz-linear-gradient(top,  #3FD2FF, #000E55);
+}
+
+#jQA-Report h1 {
+    font-size:13px;
+    font-weight:normal;
+    position:absolute;
+    left:11px;
+    line-height:50px;
+    top:0;
+    right:0;
+    text-align:center;
+    color:#000;
+    text-shadow:1px 1px #FFF;
+    box-shadow:0 0 5px #000;
+    -moz-box-shadow:0 0 5px #000;
+    -webkit-box-shadow:0 0 5px #000;
+}
+
 
 #jQA-Report h2,
 #jQA-Report th {
@@ -80,7 +111,7 @@
 }
 
 
-#jQA-Performance table {
+#jQA-Report table {
     border:none;
     width:100%;
     border-collapse:collapse;
@@ -89,12 +120,12 @@
 }
 
 
-#jQA-Performance th {
+#jQA-Report th {
     white-space:nowrap;
 }
 
-#jQA-Performance td,
-#jQA-Performance th {
+#jQA-Report td,
+#jQA-Report th {
     text-align:right;
     padding:5px 10px 0;
     vertical-align:top;
@@ -102,7 +133,7 @@
     /*border-top:1px solid rgba(255, 255, 255, 0.3);*/
 }
 
-#jQA-Performance th:first-child,
-#jQA-Performance td:first-child {
+#jQA-Report th:first-child,
+#jQA-Report td:first-child {
     text-align:left;
 }

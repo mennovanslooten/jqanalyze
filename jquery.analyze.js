@@ -1,10 +1,11 @@
 (function( $ ) {
-    var _report = $('<div id="jQA-Report"><div id="jQA-Report-Button"/><div id="jQA-Warnings"/><div id="jQA-Performance"/></div>');
+    var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
     //var _report = $('#jQA-Report');
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
     var _orig_unbind = $.fn.unbind;
     var _selectors = [];
+    var _events = [];
     var _selector_analyzers = [];
     var _event_analyzers = [];
     var _dom_analyzers = [];
@@ -21,10 +22,17 @@
         };
     }
 
-    var _find_replacement = function(selector) {
+    var _find_replacement = function(selector, context) {
         var d1 = new Date().valueOf();
         var result = _orig_find.apply(this, arguments);
         var d2 = new Date().valueOf();
+
+        console.log(selector, context);
+        if (typeof context !== 'undefined') {
+            // Skip selectors with context for now
+            console.log('jQA selector skipped:', selector, 'with context', context);
+            return result;
+        }
 
         _selectors.push({
             selector : selector,
@@ -44,7 +52,7 @@
 
 
     var _handler_wrappers = [];
-    function getHandlerWrapper(handler) {
+    function getHandlerWrapper(handler, selector) {
         if (typeof handler === 'undefined') {
             return;
         }
@@ -61,9 +69,20 @@
             var result = handler.apply(this, arguments);
             var d2 = new Date().valueOf();
             // TODO: Store timer data somewhere for another performance table
-            if (d2 - d1 > 1) {
-                console.log('executed event handler', e.type, 'in', (d2-d1), 'ms');
-            }
+            //if (d2 - d1 > 1) {
+                if (!selector && this.id) {
+                    selector = '#' + this.id;
+                } else if (!selector) {
+                    selector = '(unknown)';
+                }
+
+                console.log('executed event handler', selector, e.type, 'in', (d2-d1), 'ms');
+                _events.push({
+                    type : e.type,
+                    selector : selector,
+                    duration : (d2 - d1)
+                });
+            //}
             return result;
         }
 
@@ -88,7 +107,7 @@
             data = undefined;
         }
 
-        var result = _orig_bind.call(this, type, data, getHandlerWrapper(fn));
+        var result = _orig_bind.call(this, type, data, getHandlerWrapper(fn, this.selector));
         var d2 = new Date().valueOf();
 
         // Execute all event analyzers
@@ -155,6 +174,14 @@
 
     function initReport() {
         $('body').append(_report);
+        _report
+            .find('#jQA-CloseButton')
+            .bind('click', closeReport)
+            .trigger('click');
+        _report.bind('mouseenter', openReport);
+
+
+        /*
         var button_container = $('');
         var button = button_container.find('button');
         button.toggle(
@@ -171,7 +198,18 @@
         );
         $('body').append(button_container);
         button.click();
+        */
     }
+
+
+    function closeReport() {
+        _report.animate({right:'-470px'}, 'fast');
+    }
+
+    function openReport() {
+        _report.animate({right:'0'}, 'fast');
+    }
+
 
 
     function updatePerformanceReport() {
@@ -216,40 +254,52 @@
             html += '<td>' + row.average + '</td>';
             html += '</tr>';
         }
-        _report.find('#jQA-Performance').html(html);
-        enable();
-    }
+        _report.find('#jQA-SelectorPerformance').html(html);
 
-
-    function addPerformanceLog() {
-        var results = {};
-        for (var i = 0; i < _selectors.length; i++) {
-            var item = _selectors[i];
-            if (!results[item.selector]) {
-                results[item.selector] = {
-                    "Selector"       : item.selector,
-                    "Results"        : item.results,
-                    "Calls"          : 0,
-                    "Total Duration" : 0
+        rows = {};
+        sorted = [];
+        for (var i = 0; i < _events.length; i++) {
+            var item = _events[i];
+            if (!rows[item.selector] || rows[item.selector].type !== item.type) {
+                var new_row = {
+                    selector : item.selector,
+                    type : item.type,
+                    calls : 0,
+                    total : 0
                 };
+                sorted.push(new_row);
+                rows[item.selector] = new_row;
             }
 
-            var r = results[item.selector];
-            r["Calls"] += 1;
-            r["Total Duration"] += item.duration;
-            r["Average Duration"] = Math.round(r["Total Duration"] / r["Calls"]);
+            var row = rows[item.selector];
+            row.results = item.results;
+            row.calls += 1;
+            row.total += item.duration;
+            row.average = Math.round(row.total / row.calls);
         }
 
-        if (!$.isEmptyObject(results)) {
-            if (console.clear && confirm('Clear console?')) {
-                console.clear();
-            }
-            if (console.table) {
-                console.table(results);
-            } else if (console.dir) {
-                console.dir(results);
-            }
+        sorted.sort(function(a, b) {
+            return a.total > b.total ? -1 : 1;
+
+            return b['Total Duration'] > a['Total Duration'];
+        });
+
+        var html = '<table>';
+        html += '<thead><tr><th>Selector</th><th>Event</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
+        html += '<tbody>';
+        var length = Math.min(10, sorted.length);
+        for (var i = 0; i < length; i++) {
+            var row = sorted[i];
+            html += '<tr>';
+            html += '<td><code>' + row.selector + '</code></td>';
+            html += '<td><code>' + row.type + '</code></td>';
+            html += '<td>' + row.calls + '</td>';
+            html += '<td>' + row.total + '</td>';
+            html += '<td>' + row.average + '</td>';
+            html += '</tr>';
         }
+        _report.find('#jQA-EventPerformance').html(html);
+        enable();
     }
 
 
@@ -282,8 +332,14 @@
                 html += '<p>' + moreinfo + '</p>';
             }
             html += '</div>';
+            var item = $(html);
+            var p = item.find('p');
+            item.toggle(
+                function() { p.hide(); },
+                function() { p.show(); }
+            );
             //console.log(html)
-            _report.find('#jQA-Warnings').append(html);
+            _report.find('#jQA-Warnings').append(item);
             //console.groupEnd();
         }
     };
