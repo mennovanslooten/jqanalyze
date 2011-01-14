@@ -1,5 +1,5 @@
 (function( $ ) {
-    var _report = $('<div id="jQA-Report"><div id="jQA-Warnings"/><div id="jQA-Performance"/></div>');
+    var _report = $('<div id="jQA-Report"><div id="jQA-Report-Button"/><div id="jQA-Warnings"/><div id="jQA-Performance"/></div>');
     //var _report = $('#jQA-Report');
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
@@ -155,7 +155,7 @@
 
     function initReport() {
         $('body').append(_report);
-        var button_container = $('<div id="jQA-Report-Button"><button>Show report</button></div>');
+        var button_container = $('');
         var button = button_container.find('button');
         button.toggle(
             function() {

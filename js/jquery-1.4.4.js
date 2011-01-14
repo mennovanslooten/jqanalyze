@@ -1887,6 +1887,7 @@ jQuery.event = {
 			elemData.handle = eventHandle = function() {
 				// Handle the second event of a trigger and when
 				// an event is called after a page has unloaded
+                console.log('hello', arguments);
 				return typeof jQuery !== "undefined" && !jQuery.event.triggered ?
 					jQuery.event.handle.apply( eventHandle.elem, arguments ) :
 					undefined;
