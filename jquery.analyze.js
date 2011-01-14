@@ -1,22 +1,111 @@
 (function( $ ) {
+    var _report = $('<div id="jQA-Report"><div id="jQA-Warnings"/><div id="jQA-Performance"/></div>');
+    //var _report = $('#jQA-Report');
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
     var _selectors = [];
     var _selector_analyzers = [];
     var _event_analyzers = [];
     var _dom_analyzers = [];
+    var _BASE_DIR;
+    if (typeof console === 'undefined') {
+        window.console = {
+            log:function() {},
+            dir:function() {},
+            group:function() {},
+            groupEnd:function() {},
+            clear:function() {},
+            table:function() {},
+            warn:function() {}
+        };
+    }
+
+    var _find_replacement = function(selector) {
+        var d1 = new Date().valueOf();
+        var result = _orig_find.apply(this, arguments);
+        var d2 = new Date().valueOf();
+
+        _selectors.push({
+            selector : selector,
+            results  : result.length,
+            duration : (d2 - d1)
+        });
+
+        // Execute all selector analyzers
+        disable();
+        for (var i = 0; i < _selector_analyzers.length; i++) {
+            _selector_analyzers[i](selector, result, d1, d2);
+        }
+        enable();
+
+        return result;
+    };
+
+
+    var _bind_replacement = function(type, data, fn) {
+        var d1 = new Date().valueOf();
+        if ($.isFunction(data) || data === false) {
+            fn = data;
+            data = undefined;
+        }
+
+        // Wrap the event handler in a timer function
+        function handler() {
+            var d1 = new Date().valueOf();
+            var result = fn.apply(this, arguments);
+            var d2 = new Date().valueOf();
+            // TODO: Store timer data somewhere for another performance table
+            if (d2 - d1 > 1) {
+                console.log('executed event handler', type, 'in', (d2-d1), 'ms');
+            }
+            return result;
+        }
+
+        var result = _orig_bind.call(this, type, data, handler);
+        //var result = _orig_bind.call(this, type, data, fn);
+        var d2 = new Date().valueOf();
+
+        // Execute all event analyzers
+        disable();
+        for (var i = 0; i < _event_analyzers.length; i++) {
+            _event_analyzers[i](type, result, d1, d2);
+        }
+        enable();
+
+        return result;
+    };
 
 
     function init() {
-        enable();
         $(document).ready(initDOMAnalysis);
-        $(document).ready(initButton);
+        $(document).ready(initReport);
+
+        $('script').each(function() {
+            if (!this.src) {
+                return true;
+            }
+
+            var index = this.src.indexOf('jquery.analyze.js');
+            if (index > -1) {
+                _BASE_DIR = this.src.substr(0, index);
+            }
+        });
+        //var stylesheet = $('<link type="text/css" rel="stylesheet" href="' + _BASE_DIR + 'report.css"/>');
+        //$("head").append(stylesheet);
+        var stylesheet = document.createElement('link');
+        stylesheet.setAttribute('type', 'text/css');
+        stylesheet.setAttribute('rel', 'stylesheet');
+        stylesheet.setAttribute('href', _BASE_DIR + 'report.css');
+        document.getElementsByTagName('head')[0].appendChild(stylesheet);
+
+        enable();
+        setInterval(updatePerformanceReport, 2000);
     }
 
 
     function enable() {
-        $.fn.bind = bindReplacement;
-        $.fn.find = findReplacement;
+        $.fn.bind = _bind_replacement;
+        $.fn.find = _find_replacement;
     }
 
 
@@ -36,55 +125,69 @@
     }
 
 
-    function findReplacement(selector) {
-        var d1 = new Date().valueOf();
-        var result = _orig_find.apply(this, arguments);
-        var d2 = new Date().valueOf();
-
-        _selectors.push({
-            selector : selector,
-            results  : result.length,
-            duration : (d2 - d1)
-        });
-
-        // Execute all selector analyzers
-        disable();
-        for (var i = 0; i < _selector_analyzers.length; i++) {
-            _selector_analyzers[i](selector, result, d1, d2);
-        }
-        enable();
-
-        return result;
+    function initReport() {
+        $('body').append(_report);
+        var button_container = $('<div id="jQA-Report-Button"><button>Show report</button></div>');
+        var button = button_container.find('button');
+        button.toggle(
+            function() {
+                _report.hide();
+                $(this).text('Show report');
+            },
+            function() {
+                _report.show();
+                $(this).text('Hide report');
+            }
+        );
+        $('body').append(button_container);
+        button.click();
     }
 
 
-    function bindReplacement(type, data, fn) {
-        var d1 = new Date().valueOf();
-        var result = _orig_bind.apply(this, arguments);
-        var d2 = new Date().valueOf();
-
-        // Execute all event analyzers
+    function updatePerformanceReport() {
         disable();
-        for (var i = 0; i < _event_analyzers.length; i++) {
-            _event_analyzers[i](type, result, d1, d2);
+        var rows = {};
+        var sorted = [];
+        for (var i = 0; i < _selectors.length; i++) {
+            var item = _selectors[i];
+            if (!rows[item.selector]) {
+                var new_row = {
+                    selector : item.selector,
+                    calls : 0,
+                    total : 0
+                };
+                sorted.push(new_row);
+                rows[item.selector] = new_row;
+            }
+
+            var row = rows[item.selector];
+            row.results = item.results;
+            row.calls += 1;
+            row.total += item.duration;
+            row.average = Math.round(row.total / row.calls);
         }
-        enable();
 
-        return result;
-    }
+        sorted.sort(function(a, b) {
+            return a.total > b.total ? -1 : 1;
 
-
-    function initButton() {
-        var button = $('<button>Show report</button>');
-        button.css({
-            position:'absolute',
-            right:'1em',
-            top:'1em',
-            zIndex:1000
+            return b['Total Duration'] > a['Total Duration'];
         });
-        button.bind('click', addPerformanceLog);
 
-        $('body').append(button);
+        var html = '<table>';
+        html += '<thead><tr><th>Selector</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
+        html += '<tbody>';
+        var length = Math.min(10, sorted.length);
+        for (var i = 0; i < length; i++) {
+            var row = sorted[i];
+            html += '<tr>';
+            html += '<td><code>' + row.selector + '</code></td>';
+            html += '<td>' + row.calls + '</td>';
+            html += '<td>' + row.total + '</td>';
+            html += '<td>' + row.average + '</td>';
+            html += '</tr>';
+        }
+        _report.find('#jQA-Performance').html(html);
+        enable();
     }
 
 
@@ -140,12 +243,18 @@
         },
 
         warn : function(warning, moreinfo) {
-            console.group(warning);
+            var html = '<div class="jQA-Item jQA-Warning">';
+            html += '<h2>' + warning + '</h2>';
+            //console.group(warning);
             //console.warn.call(console, warning);
             if (moreinfo) {
-                console.log(moreinfo);
+                //console.log(moreinfo);
+                html += '<p>' + moreinfo + '</p>';
             }
-            console.groupEnd();
+            html += '</div>';
+            //console.log(html)
+            _report.find('#jQA-Warnings').append(html);
+            //console.groupEnd();
         }
     };
 
@@ -167,22 +276,25 @@
         function analyzer(selector) {
             var matches = selector.match(rx);
             if (matches) {
-                $.analyze.warn('Selector warning:"' + selector + '"', selector.replace(rx, message));
+                if (matches.length > 1) {
+                    message = selector.replace(rx, message);
+                }
+                $.analyze.warn('Selector warning: <code>' + selector + '</code>', message);
             }
         }
 
         return $.analyze.addSelectorAnalyzer(analyzer);
     };
 
-    $.analyze.addSelectorRegexp(/:[\w]+/, 'jQuery pseudo-selectors like :input are slow in IE');
+    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow');
 
     $.analyze.addSelectorRegexp(/^[\w]+#[\w]+/, 'Don\'t add elements to ID selectors');
 
     $.analyze.addSelectorRegexp(/^#[\w]+ #[\w]+/, 'Don\'t nest ID selectors');
 
-    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use $("$1").find("$2") instead');
+    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").find("$2")</code> instead');
 
-    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use $("$1").children("$2") instead');
+    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").children("$2")</code> instead');
 
 
     /*
@@ -199,7 +311,7 @@
         if (length > 1) {
             var prev = _used_selectors[length - 2];
             if (prev.selector ===  selector && prev.results === result.length) {
-                $.analyze.warn('Selector warning:"' + selector + '" used multiple times in a row.', 'If you use a selector multiple times in a row, you are probably better off storing it in a variable');
+                $.analyze.warn('Selector warning: <code>' + selector + '</code> used multiple times in a row.', 'If you use a selector multiple times in a row, you might be better off storing it in a variable');
             }
         }
     });
@@ -212,7 +324,6 @@
     $.analyze.addEventAnalyzer(function(type, result, d1, d2) {
         if (result.length > 2) {
             $.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A "' + type + '" handler was bound to $("' + result.selector + '") which returned ' + result.length + ' results. Events bound to multiple similar elements can sometimes be optimized with event delegation.');
-            //console.warn('Event warning: Consider using delegate for "', type, '" on ', result.selector);
         }
     });
 
