@@ -59,6 +59,10 @@
             <li>Three</li>
         </ul>
         <script type="text/javascript">
+            $('#delegateme li:first').bind('mouseenter', function(e) {
+                var d = new Date().valueOf(); 
+                while(new Date().valueOf() - d < 1000) { }
+            });
             $('#delegateme li').bind('click', function(e) {
                 console.log($(this).text(), 'clicked!');
             });

@@ -1,8 +1,9 @@
 /*
  * jQuery Analysis Plugin
  *
- * This plugin is set up in 3 parts:
- *  - Core: this sets up a small pub/sub hub and all the interceptors
+ * This plugin is set up in 4 parts:
+ *  - Interceptors: this sets up a small pub/sub hub and starts intercepting
+ *    find, bind and unbind.
  *  - Analysis: this inits all the actual analysis and triggers the warnings
  *  - Report: this generates a report from the warnings and does performance
  *    measurements on executed queries and event handlers. The report is added
@@ -11,34 +12,15 @@
 
 
 /* ################################################################
- * CORE
+ * INTERCEPTORS
  * ################################################################ */
 (function( $ ) {
 
-    // Extend the jQuery object with the plugin
-    $.extend($, {
-        analyze : {
-            // Pubsub FTW
-            publish: function(event, subject) {
-                disable();
-                $(document).trigger(event, subject);
-                enable();
-            }, 
-            subscribe: function(event, handler) {
-                disable();
-                $(document).bind(event, handler);
-                enable();
-            }
-        }
-    });
-    
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
     var _orig_unbind = $.fn.unbind;
-    var _selector_analyzers = [];
-    var _event_analyzers = [];
-    var _dom_analyzers = [];
-    var _BASE_DIR;
+    var _handler_wrappers = [];
+
     if (typeof console === 'undefined') {
         window.console = {
             log:function() {},
@@ -51,46 +33,6 @@
         };
     }
 
-    var _find_replacement = function(selector, context) {
-        var d1 = new Date().valueOf();
-        var result = _orig_find.apply(this, arguments);
-        var d2 = new Date().valueOf();
-
-        //console.log(selector, context);
-        if (typeof context !== 'undefined') {
-            // Skip selectors with context for now
-            console.log('jQA selector skipped:', selector, 'with context', context);
-            return result;
-        }
-
-        //_selectors.push({
-        $.analyze.publish('jqanalyze.selector', {
-            selector : selector,
-            results  : result.length,
-            duration : (d2 - d1)
-        });
-
-        // Execute all selector analyzers
-        disable();
-        //console.group('analyzing', selector);
-        for (var i = 0; i < _selector_analyzers.length; i++) {
-            var warning = _selector_analyzers[i](selector, result, d1, d2);
-            if (warning) {
-                $.analyze.publish('jqanalyze.warn', {
-                    type:'Selector',
-                    subject:selector,
-                    warning:warning
-                });
-            }
-        }
-        //console.groupEnd();
-        enable();
-
-        return result;
-    };
-
-
-    var _handler_wrappers = [];
     function getEventHandlerWrapper(handler, selector) {
         if (typeof handler === 'undefined') {
             return;
@@ -107,21 +49,17 @@
             var d1 = new Date().valueOf();
             var result = handler.apply(this, arguments);
             var d2 = new Date().valueOf();
-            // TODO: Store timer data somewhere for another performance table
-            //if (d2 - d1 > 1) {
-                if (!selector && this.id) {
-                    selector = '#' + this.id;
-                } else if (!selector) {
-                    selector = '(unknown)';
-                }
+            if (!selector && this.id) {
+                selector = '#' + this.id;
+            } else if (!selector) {
+                selector = '(unknown)';
+            }
 
-                console.log('executed event handler', selector, e.type, 'in', (d2-d1), 'ms');
-                $.analyze.publish('jqanalyze.event', {
-                    type : e.type,
-                    selector : selector,
-                    duration : (d2 - d1)
-                });
-            //}
+            $.analyze.publish('jqanalyze.trigger', {
+                type : e.type,
+                selector : selector,
+                duration : (d2 - d1)
+            });
             return result;
         }
 
@@ -149,28 +87,35 @@
         var result = _orig_bind.call(this, type, data, getEventHandlerWrapper(fn, this.selector));
         var d2 = new Date().valueOf();
 
-        // Execute all event analyzers
-        disable();
-        for (var i = 0; i < _event_analyzers.length; i++) {
-            var warning = _event_analyzers[i](type, result, d1, d2);
-            if (warning) {
-                $.analyze.publish('jqanalyze.warn', {
-                    type:'Event',
-                    subject:type,
-                    warning:warning
-                });
-            }
-        }
-        enable();
+        $.analyze.publish('jqanalyze.bind', {
+            type:type,
+            result:result,
+            duration:(d2 - d1)
+        });
 
         return result;
     };
 
 
-    function init() {
-        $(document).ready(initDOMAnalysis);
-        enable();
-    }
+    var _find_replacement = function(selector, context) {
+        var d1 = new Date().valueOf();
+        var result = _orig_find.apply(this, arguments);
+        var d2 = new Date().valueOf();
+
+        if (typeof context !== 'undefined') {
+            // Skip selectors with context for now
+            console.log('jQA selector skipped:', selector, 'with context', context);
+            return result;
+        }
+
+        $.analyze.publish('jqanalyze.find', {
+            selector : selector,
+            result   : result,
+            duration : (d2 - d1)
+        });
+
+        return result;
+    };
 
 
     function enable() {
@@ -186,9 +131,103 @@
         $.fn.find = _orig_find;
     }
 
+    $.extend($, {
+        analyze : {
+            // Pubsub FTW
+            publish: function(event, subject) {
+                disable();
+                $(document).trigger(event, subject);
+                enable();
+            }, 
+            subscribe: function(event, handler) {
+                disable();
+                $(document).bind(event, handler);
+                enable();
+            }
+        }
+    });
+    
 
-    function initDOMAnalysis() {
-        disable();
+    enable();
+})(jQuery);
+
+
+/* ################################################################
+ * ANALYZERS
+ * ################################################################ */
+(function($) {
+    var _selector_analyzers = [];
+    var _event_analyzers = [];
+    var _dom_analyzers = [];
+
+
+    function addDOMAnalyzer(analyzer) {
+        _dom_analyzers.push(analyzer);
+    }
+
+
+    function addSelectorAnalyzer(analyzer) {
+        _selector_analyzers.push(analyzer);
+    }
+
+
+    function addEventAnalyzer(analyzer) {
+        _event_analyzers.push(analyzer);
+    }
+
+
+    /*
+     * This method is used for some generic, regular-expression based selector
+     * testing.
+     */
+    function addSelectorRegexp(rx, message) {
+        function analyzer(selector) {
+            var warning = message;
+            var matches = selector.match(rx);
+            if (matches) {
+                if (matches.length > 1) {
+                    warning = matches[0].replace(rx, message);
+                }
+                return warning;
+            }
+        }
+
+        addSelectorAnalyzer(analyzer);
+    }
+
+
+    $.analyze.subscribe('jqanalyze.bind', function(e, subject) {
+        for (var i = 0; i < _event_analyzers.length; i++) {
+            var warning = _event_analyzers[i](subject.type, subject.result, subject.duration);
+            if (warning) {
+                $.analyze.publish('jqanalyze.warn', {
+                    type:'Event',
+                    subject:subject.type,
+                    warning:warning
+                });
+            }
+        }
+    });
+
+
+    $.analyze.subscribe('jqanalyze.find', function(e, subject) {
+        for (var i = 0; i < _selector_analyzers.length; i++) {
+            var warning = _selector_analyzers[i](subject.selector, subject.result, subject.duration);
+            if (warning) {
+                $.analyze.publish('jqanalyze.warn', {
+                    type:'Selector',
+                    subject:subject.selector,
+                    warning:warning
+                });
+            }
+        }
+    });
+
+
+
+
+
+    $(document).ready(function() {
         for (var i = 0; i < _dom_analyzers.length; i++) {
             var warning = _dom_analyzers[i]();
             if (warning) {
@@ -199,62 +238,189 @@
                 });
             }
         }
-        enable();
-    }
-
-
-
-
-
-
-    /*
-     * Public Plugin Methods
-     */
-    $.extend($.analyze, {
-        addDOMAnalyzer : function(analyzer) {
-            _dom_analyzers.push(analyzer);
-            return this;
-        }, 
-
-        addSelectorAnalyzer : function(analyzer) {
-            _selector_analyzers.push(analyzer);
-            return this;
-        },
-
-        addEventAnalyzer : function(analyzer) {
-            _event_analyzers.push(analyzer);
-            return this;
-        }
     });
 
 
-    init();
+    $.extend($.analyze, {
+        addDOMAnalyzer : addDOMAnalyzer, 
+        addSelectorAnalyzer : addSelectorAnalyzer,
+        addSelectorRegexp : addSelectorRegexp,
+        addEventAnalyzer : addEventAnalyzer 
+    });
+
 })(jQuery);
 
 
 /* ################################################################
- * ANALYZERS
+ * REPORT
  * ################################################################ */
-(function($) {
-    /*
-     * This method is used for some generic, regular-expression based selector
-     * testing.
-     */
-    $.analyze.addSelectorRegexp = function(rx, message) {
-        function analyzer(selector) {
-            var warning = message;
-            var matches = selector.match(rx);
-            if (matches) {
-                if (matches.length > 1) {
-                    warning = matches[0].replace(rx, message);
-                }
-                //$.analyze.warn('Selector warning: <code>' + selector + '</code>', warning);
-                return warning;
-            }
-        }
+(function( $ ) {
 
-        return $.analyze.addSelectorAnalyzer(analyzer);
-    };
+    var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
+    var _selectors_sorted = [];
+    var _events_sorted = [];
+    var _selectors = [];
+    var _events = [];
+
+
+    function loadReportCSS() {
+        var filename = 'jquery.analyze.js';
+        var oldsrc = $('script[src$="' + filename + '"]').attr('src');
+        var newsrc = oldsrc.replace(filename, 'report.css');
+        var stylesheet = document.createElement('link');
+        stylesheet.setAttribute('type', 'text/css');
+        stylesheet.setAttribute('rel', 'stylesheet');
+        stylesheet.setAttribute('href', newsrc);
+        document.getElementsByTagName('head')[0].appendChild(stylesheet);
+    }
+
+
+    function init() {
+        loadReportCSS();
+        $('body').append(_report);
+        _report
+            .find('#jQA-CloseButton')
+            .bind('click', closeReport)
+            .trigger('click');
+        _report.bind('mouseenter', openReport);
+        setInterval(updatePerformanceReport, 2000);
+    }
+
+
+    function updatePerformanceReport() {
+        updateSelectorPerformance();
+        updateHandlerPerformance();
+    }
+
+
+    function updateSelectorPerformance() {
+        var html = '<table>';
+        html += '<thead><tr><th>Selector</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
+        html += '<tbody>';
+        var length = Math.min(10, _selectors_sorted.length);
+        for (var i = 0; i < length; i++) {
+            var row = _selectors_sorted[i];
+            html += '<tr>';
+            html += '<td><code>' + row.selector + '</code></td>';
+            html += '<td>' + row.calls + '</td>';
+            html += '<td>' + row.total + '</td>';
+            html += '<td>' + row.average + '</td>';
+            html += '</tr>';
+        }
+        _report.find('#jQA-SelectorPerformance').html(html);
+    }
+
+
+    function updateHandlerPerformance() {
+        var html = '<table>';
+        html += '<thead><tr><th>Selector</th><th>Event</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
+        html += '<tbody>';
+        var length = Math.min(10, _events_sorted.length);
+        for (var i = 0; i < length; i++) {
+            var row = _events_sorted[i];
+            html += '<tr>';
+            html += '<td><code>' + row.selector + '</code></td>';
+            html += '<td><code>' + row.type + '</code></td>';
+            html += '<td>' + row.calls + '</td>';
+            html += '<td>' + row.total + '</td>';
+            html += '<td>' + row.average + '</td>';
+            html += '</tr>';
+        }
+        _report.find('#jQA-EventPerformance').html(html);
+    }
+
+
+    function closeReport() {
+        _report.animate({right:'-470px'}, 'fast');
+    }
+
+
+    function openReport() {
+        _report.animate({right:'0'}, 'fast');
+    }
+
+
+    $.analyze.subscribe('jqanalyze.trigger', function(e, subject) {
+        // Store the intercepted handlers and sort by total time spent
+        // executing
+        var item = $.grep(_events_sorted, function(n) {
+            return n.selector === subject.selector && n.type === subject.type;
+        })[0];
+
+        if (!item) {
+            item = {
+                selector : subject.selector,
+                type : subject.type,
+                calls : 0,
+                total : 0
+            };
+            _events_sorted.push(item);
+        }
+        
+        item.calls += 1;
+        item.total += subject.duration;
+        item.average = Math.round(item.total / item.calls);
+
+        _events_sorted.sort(function(a, b) {
+            return a.total > b.total ? -1 : 1;
+        });
+    });
+
+
+    $.analyze.subscribe('jqanalyze.find', function(e, subject) {
+        // Store the intercepted selectors and sort by total time spent finding
+        // the elements.
+        var item = $.grep(_selectors_sorted, function(n) {
+            return n.selector === subject.selector;
+        })[0];
+
+        if (!item) {
+            item = {
+                selector : subject.selector,
+                calls : 0,
+                total : 0
+            };
+            _selectors_sorted.push(item);
+        }
+        
+        item.calls += 1;
+        item.total += subject.duration;
+        item.average = Math.round(item.total / item.calls);
+
+        _selectors_sorted.sort(function(a, b) {
+            return a.total > b.total ? -1 : 1;
+        });
+    });
+
+
+    $.analyze.subscribe('jqanalyze.warn', function(e, warning) {
+        console.dir(warning);
+        var html = '<div class="jQA-Item jQA-Warning">';
+        var title = warning.type + ' warning: <code>' + warning.subject + '</code>';
+        html += '<h2>' + title + '</h2>';
+        if (warning.warning) {
+            html += '<p>' + warning.warning + '</p>';
+        }
+        html += '</div>';
+        var item = $(html);
+        var p = item.find('p');
+        item.toggle(
+            function() { p.hide(); },
+            function() { p.show(); }
+        );
+        _report.find('#jQA-Warnings').append(item);
+    });
+
+
+    $(document).ready(init);
+})(jQuery);
+
+
+
+/* ################################################################
+ * REPORT
+ * ################################################################ */
+(function( $ ) {
 
     $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow.');
 
@@ -290,7 +456,7 @@
      * This analyzer tests if an event is bound to multiple elements and if so,
      * suggest delegation.
      */
-    $.analyze.addEventAnalyzer(function(type, result, d1, d2) {
+    $.analyze.addEventAnalyzer(function(type, result, duration) {
         if (result.length > 2) {
             //$.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.');
             return 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.';
@@ -309,175 +475,4 @@
             return 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.';
         }
     });
-})(jQuery);
-
-
-
-
-
-
-/* ################################################################
- * REPORT
- * ################################################################ */
-(function( $ ) {
-
-    var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
-    var _selectors = [];
-    var _events = [];
-
-
-    function init() {
-        $('script').each(function() {
-            if (!this.src) {
-                return true;
-            }
-
-            var index = this.src.indexOf('jquery.analyze.js');
-            if (index > -1) {
-                _BASE_DIR = this.src.substr(0, index);
-            }
-        });
-        //var stylesheet = $('<link type="text/css" rel="stylesheet" href="' + _BASE_DIR + 'report.css"/>');
-        //$("head").append(stylesheet);
-        var stylesheet = document.createElement('link');
-        stylesheet.setAttribute('type', 'text/css');
-        stylesheet.setAttribute('rel', 'stylesheet');
-        stylesheet.setAttribute('href', _BASE_DIR + 'report.css');
-        document.getElementsByTagName('head')[0].appendChild(stylesheet);
-        $('body').append(_report);
-        _report
-            .find('#jQA-CloseButton')
-            .bind('click', closeReport)
-            .trigger('click');
-        _report.bind('mouseenter', openReport);
-        setInterval(updatePerformanceReport, 2000);
-    }
-
-
-    function updatePerformanceReport() {
-        var rows = {};
-        var sorted = [];
-        for (var i = 0; i < _selectors.length; i++) {
-            var item = _selectors[i];
-            if (!rows[item.selector]) {
-                var new_row = {
-                    selector : item.selector,
-                    calls : 0,
-                    total : 0
-                };
-                sorted.push(new_row);
-                rows[item.selector] = new_row;
-            }
-
-            var row = rows[item.selector];
-            row.results = item.results;
-            row.calls += 1;
-            row.total += item.duration;
-            row.average = Math.round(row.total / row.calls);
-        }
-
-        sorted.sort(function(a, b) {
-            return a.total > b.total ? -1 : 1;
-        });
-
-        var html = '<table>';
-        html += '<thead><tr><th>Selector</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
-        html += '<tbody>';
-        var length = Math.min(10, sorted.length);
-        for (var i = 0; i < length; i++) {
-            var row = sorted[i];
-            html += '<tr>';
-            html += '<td><code>' + row.selector + '</code></td>';
-            html += '<td>' + row.calls + '</td>';
-            html += '<td>' + row.total + '</td>';
-            html += '<td>' + row.average + '</td>';
-            html += '</tr>';
-        }
-        _report.find('#jQA-SelectorPerformance').html(html);
-
-        rows = {};
-        sorted = [];
-        for (var i = 0; i < _events.length; i++) {
-            var item = _events[i];
-            if (!rows[item.selector] || rows[item.selector].type !== item.type) {
-                var new_row = {
-                    selector : item.selector,
-                    type : item.type,
-                    calls : 0,
-                    total : 0
-                };
-                sorted.push(new_row);
-                rows[item.selector] = new_row;
-            }
-
-            var row = rows[item.selector];
-            row.results = item.results;
-            row.calls += 1;
-            row.total += item.duration;
-            row.average = Math.round(row.total / row.calls);
-        }
-
-        sorted.sort(function(a, b) {
-            return a.total > b.total ? -1 : 1;
-
-            return b['Total Duration'] > a['Total Duration'];
-        });
-
-        var html = '<table>';
-        html += '<thead><tr><th>Selector</th><th>Event</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
-        html += '<tbody>';
-        var length = Math.min(10, sorted.length);
-        for (var i = 0; i < length; i++) {
-            var row = sorted[i];
-            html += '<tr>';
-            html += '<td><code>' + row.selector + '</code></td>';
-            html += '<td><code>' + row.type + '</code></td>';
-            html += '<td>' + row.calls + '</td>';
-            html += '<td>' + row.total + '</td>';
-            html += '<td>' + row.average + '</td>';
-            html += '</tr>';
-        }
-        _report.find('#jQA-EventPerformance').html(html);
-    }
-    function closeReport() {
-        _report.animate({right:'-470px'}, 'fast');
-    }
-
-
-    function openReport() {
-        _report.animate({right:'0'}, 'fast');
-    }
-
-
-    $.analyze.subscribe('jqanalyze.event', function(e, subject) {
-        _events.push(subject);
-    });
-
-
-    $.analyze.subscribe('jqanalyze.selector', function(e, subject) {
-        _selectors.push(subject);
-    });
-
-
-    $.analyze.subscribe('jqanalyze.warn', function(e, warning) {
-        console.dir(warning);
-        var html = '<div class="jQA-Item jQA-Warning">';
-        var title = warning.type + ' warning: <code>' + warning.subject + '</code>';
-        html += '<h2>' + title + '</h2>';
-        if (warning.warning) {
-            html += '<p>' + warning.warning + '</p>';
-        }
-        html += '</div>';
-        var item = $(html);
-        var p = item.find('p');
-        item.toggle(
-            function() { p.hide(); },
-            function() { p.show(); }
-            );
-        _report.find('#jQA-Warnings').append(item);
-    });
-
-
-    $(document).ready(init);
-    //init();
-})(jQuery);
+})(jQuery);    
