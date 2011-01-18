@@ -1,4 +1,10 @@
 (function( $ ) {
+
+    // Extend the jQuery object with the plugin
+    $.extend($, {
+        analyze : {}
+    });
+    
     var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
     //var _report = $('#jQA-Report');
     var _orig_find = $.fn.find;
@@ -27,7 +33,7 @@
         var result = _orig_find.apply(this, arguments);
         var d2 = new Date().valueOf();
 
-        console.log(selector, context);
+        //console.log(selector, context);
         if (typeof context !== 'undefined') {
             // Skip selectors with context for now
             console.log('jQA selector skipped:', selector, 'with context', context);
@@ -42,9 +48,11 @@
 
         // Execute all selector analyzers
         disable();
+        console.group('analyzing', selector);
         for (var i = 0; i < _selector_analyzers.length; i++) {
             _selector_analyzers[i](selector, result, d1, d2);
         }
+        console.groupEnd();
         enable();
 
         return result;
@@ -52,7 +60,7 @@
 
 
     var _handler_wrappers = [];
-    function getHandlerWrapper(handler, selector) {
+    function getEventHandlerWrapper(handler, selector) {
         if (typeof handler === 'undefined') {
             return;
         }
@@ -96,7 +104,7 @@
 
 
     var _unbind_replacement = function(type, fn) {
-        return _orig_unbind.call(this, type, getHandlerWrapper(fn));
+        return _orig_unbind.call(this, type, getEventHandlerWrapper(fn));
     };
 
 
@@ -107,7 +115,7 @@
             data = undefined;
         }
 
-        var result = _orig_bind.call(this, type, data, getHandlerWrapper(fn, this.selector));
+        var result = _orig_bind.call(this, type, data, getEventHandlerWrapper(fn, this.selector));
         var d2 = new Date().valueOf();
 
         // Execute all event analyzers
@@ -237,8 +245,6 @@
 
         sorted.sort(function(a, b) {
             return a.total > b.total ? -1 : 1;
-
-            return b['Total Duration'] > a['Total Duration'];
         });
 
         var html = '<table>';
@@ -306,7 +312,7 @@
     /*
      * Public Plugin Methods
      */
-    $.analyze = {
+    $.extend($.analyze, {
         addDOMAnalyzer : function(analyzer) {
             _dom_analyzers.push(analyzer);
             return this;
@@ -341,8 +347,12 @@
             //console.log(html)
             _report.find('#jQA-Warnings').append(item);
             //console.groupEnd();
+            $(document).trigger('warn.jqanalyze', {
+                warning:warning,
+                moreinfo:moreinfo
+            });
         }
-    };
+    });
 
 
     init();
@@ -358,14 +368,14 @@
      * testing.
      */
     $.analyze.addSelectorRegexp = function(rx, message) {
-
         function analyzer(selector) {
+            var warning = message;
             var matches = selector.match(rx);
             if (matches) {
                 if (matches.length > 1) {
-                    message = matches[0].replace(rx, message);
+                    warning = matches[0].replace(rx, message);
                 }
-                $.analyze.warn('Selector warning: <code>' + selector + '</code>', message);
+                $.analyze.warn('Selector warning: <code>' + selector + '</code>', warning);
             }
         }
 
@@ -421,5 +431,16 @@
         if (baaaaad.length) {
             $.analyze.warn('DOM warning: Don\'t name a form element "submit"', 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.');
         }
+    });
+})(jQuery);
+
+
+
+
+
+
+(function( $ ) {
+    $(document).bind('warn.jqanalyze', function(e, warning) {
+        console.dir(warning);
     });
 })(jQuery);
