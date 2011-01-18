@@ -1,17 +1,40 @@
+/*
+ * jQuery Analysis Plugin
+ *
+ * This plugin is set up in 3 parts:
+ *  - Core: this sets up a small pub/sub hub and all the interceptors
+ *  - Analysis: this inits all the actual analysis and triggers the warnings
+ *  - Report: this generates a report from the warnings and does performance
+ *    measurements on executed queries and event handlers. The report is added
+ *    to the page as an overlay on the right.
+ */
+
+
+/* ################################################################
+ * CORE
+ * ################################################################ */
 (function( $ ) {
 
     // Extend the jQuery object with the plugin
     $.extend($, {
-        analyze : {}
+        analyze : {
+            // Pubsub FTW
+            publish: function(event, subject) {
+                disable();
+                $(document).trigger(event, subject);
+                enable();
+            }, 
+            subscribe: function(event, handler) {
+                disable();
+                $(document).bind(event, handler);
+                enable();
+            }
+        }
     });
     
-    var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
-    //var _report = $('#jQA-Report');
     var _orig_find = $.fn.find;
     var _orig_bind = $.fn.bind;
     var _orig_unbind = $.fn.unbind;
-    var _selectors = [];
-    var _events = [];
     var _selector_analyzers = [];
     var _event_analyzers = [];
     var _dom_analyzers = [];
@@ -40,7 +63,8 @@
             return result;
         }
 
-        _selectors.push({
+        //_selectors.push({
+        $.analyze.publish('jqanalyze.selector', {
             selector : selector,
             results  : result.length,
             duration : (d2 - d1)
@@ -48,11 +72,18 @@
 
         // Execute all selector analyzers
         disable();
-        console.group('analyzing', selector);
+        //console.group('analyzing', selector);
         for (var i = 0; i < _selector_analyzers.length; i++) {
-            _selector_analyzers[i](selector, result, d1, d2);
+            var warning = _selector_analyzers[i](selector, result, d1, d2);
+            if (warning) {
+                $.analyze.publish('jqanalyze.warn', {
+                    type:'Selector',
+                    subject:selector,
+                    warning:warning
+                });
+            }
         }
-        console.groupEnd();
+        //console.groupEnd();
         enable();
 
         return result;
@@ -85,7 +116,7 @@
                 }
 
                 console.log('executed event handler', selector, e.type, 'in', (d2-d1), 'ms');
-                _events.push({
+                $.analyze.publish('jqanalyze.event', {
                     type : e.type,
                     selector : selector,
                     duration : (d2 - d1)
@@ -121,7 +152,14 @@
         // Execute all event analyzers
         disable();
         for (var i = 0; i < _event_analyzers.length; i++) {
-            _event_analyzers[i](type, result, d1, d2);
+            var warning = _event_analyzers[i](type, result, d1, d2);
+            if (warning) {
+                $.analyze.publish('jqanalyze.warn', {
+                    type:'Event',
+                    subject:type,
+                    warning:warning
+                });
+            }
         }
         enable();
 
@@ -131,28 +169,7 @@
 
     function init() {
         $(document).ready(initDOMAnalysis);
-        $(document).ready(initReport);
-
-        $('script').each(function() {
-            if (!this.src) {
-                return true;
-            }
-
-            var index = this.src.indexOf('jquery.analyze.js');
-            if (index > -1) {
-                _BASE_DIR = this.src.substr(0, index);
-            }
-        });
-        //var stylesheet = $('<link type="text/css" rel="stylesheet" href="' + _BASE_DIR + 'report.css"/>');
-        //$("head").append(stylesheet);
-        var stylesheet = document.createElement('link');
-        stylesheet.setAttribute('type', 'text/css');
-        stylesheet.setAttribute('rel', 'stylesheet');
-        stylesheet.setAttribute('href', _BASE_DIR + 'report.css');
-        document.getElementsByTagName('head')[0].appendChild(stylesheet);
-
         enable();
-        setInterval(updatePerformanceReport, 2000);
     }
 
 
@@ -173,55 +190,171 @@
     function initDOMAnalysis() {
         disable();
         for (var i = 0; i < _dom_analyzers.length; i++) {
-            var analyzer = _dom_analyzers[i];
-            analyzer();
+            var warning = _dom_analyzers[i]();
+            if (warning) {
+                $.analyze.publish('jqanalyze.warn', {
+                    type:'DOM',
+                    subject:'',
+                    warning:warning
+                });
+            }
         }
         enable();
     }
 
 
-    function initReport() {
+
+
+
+
+    /*
+     * Public Plugin Methods
+     */
+    $.extend($.analyze, {
+        addDOMAnalyzer : function(analyzer) {
+            _dom_analyzers.push(analyzer);
+            return this;
+        }, 
+
+        addSelectorAnalyzer : function(analyzer) {
+            _selector_analyzers.push(analyzer);
+            return this;
+        },
+
+        addEventAnalyzer : function(analyzer) {
+            _event_analyzers.push(analyzer);
+            return this;
+        }
+    });
+
+
+    init();
+})(jQuery);
+
+
+/* ################################################################
+ * ANALYZERS
+ * ################################################################ */
+(function($) {
+    /*
+     * This method is used for some generic, regular-expression based selector
+     * testing.
+     */
+    $.analyze.addSelectorRegexp = function(rx, message) {
+        function analyzer(selector) {
+            var warning = message;
+            var matches = selector.match(rx);
+            if (matches) {
+                if (matches.length > 1) {
+                    warning = matches[0].replace(rx, message);
+                }
+                //$.analyze.warn('Selector warning: <code>' + selector + '</code>', warning);
+                return warning;
+            }
+        }
+
+        return $.analyze.addSelectorAnalyzer(analyzer);
+    };
+
+    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow.');
+
+    $.analyze.addSelectorRegexp(/^.+(#[\w]+)/, 'Don\'t nest ID selector in another selector. Use <code>$("$1")</code> instead.');
+
+    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").find("$2")</code> instead.');
+
+    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").children("$2")</code> instead.');
+
+
+    /*
+     * This analyzer tests if a selector is used multiple times in a row and
+     * yields similar results. If so, suggest storing the result in a variable.
+     */
+    var _used_selectors = [];
+    $.analyze.addSelectorAnalyzer(function(selector, result, d1, d2) {
+        _used_selectors.push({
+            selector:selector,
+            results:result.length
+        });
+        var length = _used_selectors.length;
+        if (length > 1) {
+            var prev = _used_selectors[length - 2];
+            if (prev.selector ===  selector && prev.results === result.length) {
+                //$.analyze.warn('Selector warning: <code>' + selector + '</code> used multiple times in a row.', 'If you use a selector multiple times in a row, you might be better off storing it in a variable');
+                return '<code>' + selector + '</code> used multiple times in a row. If you use a selector multiple times in a row, you might be better off storing it in a variable';
+            }
+        }
+    });
+
+
+    /*
+     * This analyzer tests if an event is bound to multiple elements and if so,
+     * suggest delegation.
+     */
+    $.analyze.addEventAnalyzer(function(type, result, d1, d2) {
+        if (result.length > 2) {
+            //$.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.');
+            return 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.';
+        }
+    });
+
+
+    /*
+     * This analyzer tests is a form element exists with the name or id
+     * "submit".
+     */
+    $.analyze.addDOMAnalyzer(function() {
+        var baaaaad = $('form :input[name=submit], form :input[id=submit]');
+        if (baaaaad.length) {
+            //$.analyze.warn('DOM warning: Don\'t name a form element "submit"', 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.');
+            return 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.';
+        }
+    });
+})(jQuery);
+
+
+
+
+
+
+/* ################################################################
+ * REPORT
+ * ################################################################ */
+(function( $ ) {
+
+    var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
+    var _selectors = [];
+    var _events = [];
+
+
+    function init() {
+        $('script').each(function() {
+            if (!this.src) {
+                return true;
+            }
+
+            var index = this.src.indexOf('jquery.analyze.js');
+            if (index > -1) {
+                _BASE_DIR = this.src.substr(0, index);
+            }
+        });
+        //var stylesheet = $('<link type="text/css" rel="stylesheet" href="' + _BASE_DIR + 'report.css"/>');
+        //$("head").append(stylesheet);
+        var stylesheet = document.createElement('link');
+        stylesheet.setAttribute('type', 'text/css');
+        stylesheet.setAttribute('rel', 'stylesheet');
+        stylesheet.setAttribute('href', _BASE_DIR + 'report.css');
+        document.getElementsByTagName('head')[0].appendChild(stylesheet);
         $('body').append(_report);
         _report
             .find('#jQA-CloseButton')
             .bind('click', closeReport)
             .trigger('click');
         _report.bind('mouseenter', openReport);
-
-
-        /*
-        var button_container = $('');
-        var button = button_container.find('button');
-        button.toggle(
-            function() {
-                //_report.hide();
-                _report.animate({right:'-470px'}, 'fast');
-                $(this).text('Show report');
-            },
-            function() {
-                //_report.show();
-                _report.animate({right:'0'}, 'fast');
-                $(this).text('Hide report');
-            }
-        );
-        $('body').append(button_container);
-        button.click();
-        */
+        setInterval(updatePerformanceReport, 2000);
     }
-
-
-    function closeReport() {
-        _report.animate({right:'-470px'}, 'fast');
-    }
-
-    function openReport() {
-        _report.animate({right:'0'}, 'fast');
-    }
-
 
 
     function updatePerformanceReport() {
-        disable();
         var rows = {};
         var sorted = [];
         for (var i = 0; i < _selectors.length; i++) {
@@ -305,142 +438,46 @@
             html += '</tr>';
         }
         _report.find('#jQA-EventPerformance').html(html);
-        enable();
+    }
+    function closeReport() {
+        _report.animate({right:'-470px'}, 'fast');
     }
 
 
-    /*
-     * Public Plugin Methods
-     */
-    $.extend($.analyze, {
-        addDOMAnalyzer : function(analyzer) {
-            _dom_analyzers.push(analyzer);
-            return this;
-        }, 
+    function openReport() {
+        _report.animate({right:'0'}, 'fast');
+    }
 
-        addSelectorAnalyzer : function(analyzer) {
-            _selector_analyzers.push(analyzer);
-            return this;
-        },
 
-        addEventAnalyzer : function(analyzer) {
-            _event_analyzers.push(analyzer);
-            return this;
-        },
-
-        warn : function(warning, moreinfo) {
-            var html = '<div class="jQA-Item jQA-Warning">';
-            html += '<h2>' + warning + '</h2>';
-            //console.group(warning);
-            //console.warn.call(console, warning);
-            if (moreinfo) {
-                //console.log(moreinfo);
-                html += '<p>' + moreinfo + '</p>';
-            }
-            html += '</div>';
-            var item = $(html);
-            var p = item.find('p');
-            item.toggle(
-                function() { p.hide(); },
-                function() { p.show(); }
-            );
-            //console.log(html)
-            _report.find('#jQA-Warnings').append(item);
-            //console.groupEnd();
-            $(document).trigger('warn.jqanalyze', {
-                warning:warning,
-                moreinfo:moreinfo
-            });
-        }
+    $.analyze.subscribe('jqanalyze.event', function(e, subject) {
+        _events.push(subject);
     });
 
 
-    init();
-})(jQuery);
-
-
-/* ################################################################
- * DEFAULT ANALYZERS
- * ################################################################ */
-(function($) {
-    /*
-     * This method is used for some generic, regular-expression based selector
-     * testing.
-     */
-    $.analyze.addSelectorRegexp = function(rx, message) {
-        function analyzer(selector) {
-            var warning = message;
-            var matches = selector.match(rx);
-            if (matches) {
-                if (matches.length > 1) {
-                    warning = matches[0].replace(rx, message);
-                }
-                $.analyze.warn('Selector warning: <code>' + selector + '</code>', warning);
-            }
-        }
-
-        return $.analyze.addSelectorAnalyzer(analyzer);
-    };
-
-    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow.');
-
-    $.analyze.addSelectorRegexp(/^.+(#[\w]+)/, 'Don\'t nest ID selector in another selector. Use <code>$("$1")</code> instead.');
-
-    $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").find("$2")</code> instead.');
-
-    $.analyze.addSelectorRegexp(/^(#[\w]+) > (.+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").children("$2")</code> instead.');
-
-
-    /*
-     * This analyzer tests if a selector is used multiple times in a row and
-     * yields similar results. If so, suggest storing the result in a variable.
-     */
-    var _used_selectors = [];
-    $.analyze.addSelectorAnalyzer(function(selector, result, d1, d2) {
-        _used_selectors.push({
-            selector:selector,
-            results:result.length
-        });
-        var length = _used_selectors.length;
-        if (length > 1) {
-            var prev = _used_selectors[length - 2];
-            if (prev.selector ===  selector && prev.results === result.length) {
-                $.analyze.warn('Selector warning: <code>' + selector + '</code> used multiple times in a row.', 'If you use a selector multiple times in a row, you might be better off storing it in a variable');
-            }
-        }
+    $.analyze.subscribe('jqanalyze.selector', function(e, subject) {
+        _selectors.push(subject);
     });
 
 
-    /*
-     * This analyzer tests if an event is bound to multiple elements and if so,
-     * suggest delegation.
-     */
-    $.analyze.addEventAnalyzer(function(type, result, d1, d2) {
-        if (result.length > 2) {
-            $.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.');
-        }
-    });
-
-
-    /*
-     * This analyzer tests is a form element exists with the name or id
-     * "submit".
-     */
-    $.analyze.addDOMAnalyzer(function() {
-        var baaaaad = $('form :input[name=submit], form :input[id=submit]');
-        if (baaaaad.length) {
-            $.analyze.warn('DOM warning: Don\'t name a form element "submit"', 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.');
-        }
-    });
-})(jQuery);
-
-
-
-
-
-
-(function( $ ) {
-    $(document).bind('warn.jqanalyze', function(e, warning) {
+    $.analyze.subscribe('jqanalyze.warn', function(e, warning) {
         console.dir(warning);
+        var html = '<div class="jQA-Item jQA-Warning">';
+        var title = warning.type + ' warning: <code>' + warning.subject + '</code>';
+        html += '<h2>' + title + '</h2>';
+        if (warning.warning) {
+            html += '<p>' + warning.warning + '</p>';
+        }
+        html += '</div>';
+        var item = $(html);
+        var p = item.find('p');
+        item.toggle(
+            function() { p.hide(); },
+            function() { p.show(); }
+            );
+        _report.find('#jQA-Warnings').append(item);
     });
+
+
+    $(document).ready(init);
+    //init();
 })(jQuery);
