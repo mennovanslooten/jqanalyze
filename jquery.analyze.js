@@ -8,6 +8,9 @@
  *  - Report: this generates a report from the warnings and does performance
  *    measurements on executed queries and event handlers. The report is added
  *    to the page as an overlay on the right.
+ *  - Default analyzers: this sets up a couple of default selector, event and
+ *    DOM analyzers.
+ *  
  */
 
 
@@ -55,11 +58,13 @@
                 selector = '(unknown)';
             }
 
-            $.analyze.publish('jqanalyze.trigger', {
-                type : e.type,
-                selector : selector,
-                duration : (d2 - d1)
-            });
+            if (!selector || selector.indexOf('#jQA-') === -1) {
+                $.analyze.publish('jqanalyze.trigger', {
+                    type : e.type,
+                    selector : selector,
+                    duration : (d2 - d1)
+                });
+            }
             return result;
         }
 
@@ -87,11 +92,13 @@
         var result = _orig_bind.call(this, type, data, getEventHandlerWrapper(fn, this.selector));
         var d2 = new Date().valueOf();
 
-        $.analyze.publish('jqanalyze.bind', {
-            type:type,
-            result:result,
-            duration:(d2 - d1)
-        });
+        if (!this.selector || this.selector.indexOf('#jQA-') === -1) {
+            $.analyze.publish('jqanalyze.bind', {
+                type:type,
+                result:result,
+                duration:(d2 - d1)
+            });
+        }
 
         return result;
     };
@@ -108,11 +115,13 @@
             return result;
         }
 
-        $.analyze.publish('jqanalyze.find', {
-            selector : selector,
-            result   : result,
-            duration : (d2 - d1)
-        });
+        if (!selector || selector.indexOf('#jQA-') === -1) {
+            $.analyze.publish('jqanalyze.find', {
+                selector : selector,
+                result   : result,
+                duration : (d2 - d1)
+            });
+        }
 
         return result;
     };
@@ -130,6 +139,7 @@
         $.fn.bind = _orig_bind;
         $.fn.find = _orig_find;
     }
+
 
     $.extend($, {
         analyze : {
@@ -153,7 +163,7 @@
 
 
 /* ################################################################
- * ANALYZERS
+ * ANALYSIS
  * ################################################################ */
 (function($) {
     var _selector_analyzers = [];
@@ -224,9 +234,6 @@
     });
 
 
-
-
-
     $(document).ready(function() {
         for (var i = 0; i < _dom_analyzers.length; i++) {
             var warning = _dom_analyzers[i]();
@@ -256,7 +263,14 @@
  * ################################################################ */
 (function( $ ) {
 
-    var _report = $('<div id="jQA-Report"><div id="jQA-CloseButton">close</div><h1>jQuery Analysis Tool</h1><div id="jQA-Warnings"/><div id="jQA-SelectorPerformance"/><div id="jQA-EventPerformance"/></div>');
+    var _report = $(
+        '<div id="jQA-Report">'
+            + '<div title="Close" id="jQA-CloseButton">close</div>'
+            + '<h1>jQuery Analysis Tool</h1>'
+            + '<div id="jQA-Warnings" title="Warnings"/>'
+            + '<div id="jQA-SelectorPerformance" title="Selector performance"/>'
+            + '<div id="jQA-EventPerformance" title="Event handler performance"/>'
+        + '</div>');
     var _selectors_sorted = [];
     var _events_sorted = [];
     var _selectors = [];
@@ -288,12 +302,12 @@
 
 
     function updatePerformanceReport() {
-        updateSelectorPerformance();
-        updateHandlerPerformance();
+        updateSelectorPerformanceTable();
+        updateHandlerPerformanceTable();
     }
 
 
-    function updateSelectorPerformance() {
+    function updateSelectorPerformanceTable() {
         var html = '<table>';
         html += '<thead><tr><th>Selector</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
         html += '<tbody>';
@@ -311,7 +325,7 @@
     }
 
 
-    function updateHandlerPerformance() {
+    function updateHandlerPerformanceTable() {
         var html = '<table>';
         html += '<thead><tr><th>Selector</th><th>Event</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
         html += '<tbody>';
@@ -394,7 +408,6 @@
 
 
     $.analyze.subscribe('jqanalyze.warn', function(e, warning) {
-        console.dir(warning);
         var html = '<div class="jQA-Item jQA-Warning">';
         var title = warning.type + ' warning: <code>' + warning.subject + '</code>';
         html += '<h2>' + title + '</h2>';
@@ -418,13 +431,13 @@
 
 
 /* ################################################################
- * REPORT
+ * DEFAULT ANALYZERS
  * ################################################################ */
 (function( $ ) {
 
-    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> are slow.');
+    $.analyze.addSelectorRegexp(/(:[\w]+)/, 'jQuery pseudo-selectors like <code>$1</code> can be slow.');
 
-    $.analyze.addSelectorRegexp(/^.+(#[\w]+)/, 'Don\'t nest ID selector in another selector. Use <code>$("$1")</code> instead.');
+    $.analyze.addSelectorRegexp(/^.+(#[\w]+)/, 'There should be no need to prepend an ID selector with another selector. Use <code>$("$1")</code> instead.');
 
     $.analyze.addSelectorRegexp(/^(#[\w]+) ([^>].+)/, 'Don\'t follow ID selectors with other selectors. Use <code>$("$1").find("$2")</code> instead.');
 
@@ -436,7 +449,7 @@
      * yields similar results. If so, suggest storing the result in a variable.
      */
     var _used_selectors = [];
-    $.analyze.addSelectorAnalyzer(function(selector, result, d1, d2) {
+    $.analyze.addSelectorAnalyzer(function(selector, result, duration) {
         _used_selectors.push({
             selector:selector,
             results:result.length
@@ -445,7 +458,6 @@
         if (length > 1) {
             var prev = _used_selectors[length - 2];
             if (prev.selector ===  selector && prev.results === result.length) {
-                //$.analyze.warn('Selector warning: <code>' + selector + '</code> used multiple times in a row.', 'If you use a selector multiple times in a row, you might be better off storing it in a variable');
                 return '<code>' + selector + '</code> used multiple times in a row. If you use a selector multiple times in a row, you might be better off storing it in a variable';
             }
         }
@@ -458,7 +470,6 @@
      */
     $.analyze.addEventAnalyzer(function(type, result, duration) {
         if (result.length > 2) {
-            //$.analyze.warn('Event warning: handler bound to ' + result.length + ' elements', 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.');
             return 'A <code>' + type + '</code> handler was bound to <code>$("' + result.selector + '")</code> which returned ' + result.length + ' results. Handlers bound to multiple similar elements can sometimes be optimized with event delegation.';
         }
     });
@@ -471,7 +482,6 @@
     $.analyze.addDOMAnalyzer(function() {
         var baaaaad = $('form :input[name=submit], form :input[id=submit]');
         if (baaaaad.length) {
-            //$.analyze.warn('DOM warning: Don\'t name a form element "submit"', 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.');
             return 'Form elements with a name or id attribute with value "submit" can interfere with the form\'s submit event.';
         }
     });

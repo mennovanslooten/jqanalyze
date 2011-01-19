@@ -29,22 +29,26 @@
     left:10px;
     bottom:0;
     right:0;
-    overflow:auto;
+    overflow:hidden;
     border-top:1px solid rgba(255, 255, 255, 0.3);
     border-bottom:1px solid rgba(0, 0, 0, 0.3);
 }
 
 #jQA-Warnings {
+    overflow:auto;
+    background:rgba(255,0,0,0.1);
     top:50px;
     bottom:50%;
 }
 
 #jQA-SelectorPerformance {
+    background:rgba(0,255,0,0.1);
     top:50%;
     bottom:25%;
 }
 
 #jQA-EventPerformance {
+    background:rgba(0,0,255,0.1);
     top:75%;
 }
 
