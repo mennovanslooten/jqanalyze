@@ -25,10 +25,16 @@ report is updated in real time so if you continue to interact with the page
 you'll get more (interesting) results. It doesn't matter if you close the
 report or leave it open in the meantime.
 
+### Bookmarklet
+
+You can also install this bookmarklet by dragging the link to your bookmarks
+bar: [jqanalyze](javascript:(function(\){d=document;s=d.createElement('script'\);s.setAttribute('src','https://github.com/mennovanslooten/jqanalyze/raw/master/jquery.analyze.js'\);d.getElementsByTagName('head'\)[0].appendChild(s\);}\)(\))
+
 ## How not to use
 
 Please don't take any of the current feedback very seriously. It is only
-intended as a proof of concept.
+intended as a proof of concept. Also, I didn't do a lot of testing in IE so
+you're on your own there.
 
 ## How to contribute
 
@@ -91,3 +97,9 @@ a selector analyzer:
         displayed
         */
     });
+
+## Credits
+
+I'd like to thank [Gijs Kruitbosch](http://www.gijsk.com/) and [Karl
+Swedberg](http://www.karlswedberg.com/) for their ideas and help during the
+development.
