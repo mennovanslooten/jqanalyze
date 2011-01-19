@@ -12,11 +12,12 @@ jQuery selectors and event handlers.
 
 ## How to use
 
-To use the plugin in your jQuery project, simply add the following script tag
-to your HTML. For the best results, add it right after the jQuery script tag.
+To use the plugin in your jQuery project, simply add the plugin directory to
+your root and add the following script tag to your HTML. For the best results,
+add it right after the jQuery script tag.
 
     <script type="text/javascript"
-    src="http://..../jquery.analyze.js"></script>
+    src="path/to/jqanalyze/jquery.analyze.js"></script>
 
 If you then open the page in your browser you'll see a yellow and black striped
 bar on the right. Hover over that bar to see the report for that page. The
