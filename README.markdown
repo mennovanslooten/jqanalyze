@@ -10,6 +10,11 @@ The plugin is equipped to give feedback on use of jQuery selectors, bound
 events and DOM structure. Additionally it will measure the performance of
 jQuery selectors and event handlers.
 
+## Demo
+
+You can [view a demo here](http://experiments.mennovanslooten.nl/2011/jqanalyze/demos/)
+of jqanalyze analyzing the [jQuery UI](http://jqueryui.com) demo page.
+
 ## How to use
 
 To use the plugin in your jQuery project, simply add the plugin directory to

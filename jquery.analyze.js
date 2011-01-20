@@ -1,5 +1,7 @@
 /*
  * jQuery Analysis Plugin
+ * Copyright 2011, Menno van Slooten
+ * Dual licensed under the MIT or GPL Version 2 licenses.
  *
  * This plugin is set up in 4 parts:
  *  - Interceptors: this sets up a small pub/sub hub and starts intercepting
@@ -143,6 +145,8 @@
 
     $.extend($, {
         analyze : {
+            enable: enable,
+            disable: disable,
             // Pubsub FTW
             publish: function(event, subject) {
                 disable();
@@ -207,6 +211,7 @@
 
 
     $.analyze.subscribe('jqanalyze.bind', function(e, subject) {
+        $.analyze.disable();
         for (var i = 0; i < _event_analyzers.length; i++) {
             var warning = _event_analyzers[i](subject.type, subject.result, subject.duration);
             if (warning) {
@@ -217,10 +222,12 @@
                 });
             }
         }
+        $.analyze.enable();
     });
 
 
     $.analyze.subscribe('jqanalyze.find', function(e, subject) {
+        $.analyze.disable();
         for (var i = 0; i < _selector_analyzers.length; i++) {
             var warning = _selector_analyzers[i](subject.selector, subject.result, subject.duration);
             if (warning) {
@@ -231,10 +238,12 @@
                 });
             }
         }
+        $.analyze.enable();
     });
 
 
     $(document).ready(function() {
+        $.analyze.disable();
         for (var i = 0; i < _dom_analyzers.length; i++) {
             var warning = _dom_analyzers[i]();
             if (warning) {
@@ -245,6 +254,7 @@
                 });
             }
         }
+        $.analyze.enable();
     });
 
 
@@ -265,8 +275,9 @@
 
     var _report = $(
         '<div id="jQA-Report">'
-            + '<div title="Close" id="jQA-CloseButton">close</div>'
             + '<h1>jQuery Analysis Tool</h1>'
+            + '<div title="Close" id="jQA-CloseButton">close</div>'
+            + '<a href="https://github.com/mennovanslooten/jqanalyze" title="Info" id="jQA-InfoButton">info</a>'
             + '<div id="jQA-Warnings" title="Warnings"/>'
             + '<div id="jQA-SelectorPerformance" title="Selector performance"/>'
             + '<div id="jQA-EventPerformance" title="Event handler performance"/>'
@@ -294,10 +305,11 @@
         $('body').append(_report);
         _report
             .find('#jQA-CloseButton')
-            .bind('click', closeReport)
-            .trigger('click');
+            .bind('click', closeReport);
+        setTimeout(closeReport, 1000);
+
         _report.bind('mouseenter', openReport);
-        setInterval(updatePerformanceReport, 2000);
+        //setInterval(updatePerformanceReport, 2000);
     }
 
 
@@ -305,6 +317,8 @@
         updateSelectorPerformanceTable();
         updateHandlerPerformanceTable();
     }
+    $.analyze.subscribe('jqanalyze.trigger', updatePerformanceReport);
+    $.analyze.subscribe('jqanalyze.find', updatePerformanceReport);
 
 
     function updateSelectorPerformanceTable() {
