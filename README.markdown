@@ -15,6 +15,12 @@ jQuery selectors and event handlers.
 You can [view a demo here](http://experiments.mennovanslooten.nl/2011/jqanalyze/demos/)
 of jqanalyze analyzing the [jQuery UI](http://jqueryui.com) demo page.
 
+## How not to use
+
+Please don't take any of the current feedback very seriously. It is only
+intended as a proof of concept. Also, I didn't do a lot of testing in IE so
+you're on your own there.
+
 ## How to use
 
 To use the plugin in your jQuery project, simply add the plugin directory to
@@ -29,12 +35,6 @@ bar on the right. Hover over that bar to see the report for that page. The
 report is updated in real time so if you continue to interact with the page
 you'll get more (interesting) results. It doesn't matter if you close the
 report or leave it open in the meantime.
-
-## How not to use
-
-Please don't take any of the current feedback very seriously. It is only
-intended as a proof of concept. Also, I didn't do a lot of testing in IE so
-you're on your own there.
 
 ## How to contribute
 
