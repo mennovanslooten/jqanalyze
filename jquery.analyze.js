@@ -282,10 +282,18 @@
             + '<div id="jQA-SelectorPerformance" title="Selector performance"/>'
             + '<div id="jQA-EventPerformance" title="Event handler performance"/>'
         + '</div>');
-    var _selectors_sorted = [];
-    var _events_sorted = [];
-    var _selectors = [];
-    var _events = [];
+    var _ds = {
+        selectors: {
+            ary: [],
+            attr: 'total',
+            dir: -1
+        },
+        events: {
+            ary: [],
+            attr: 'total',
+            dir: -1
+        }
+    }
 
 
     function loadReportCSS() {
@@ -300,9 +308,13 @@
     }
 
 
+    var _selectorPerfContainer = _report.find('#jQA-SelectorPerformance');
+    var _handlerPerfContainer = _report.find('#jQA-EventPerformance');
+    var _warningContainer = _report.find('#jQA-Warnings');
     function init() {
         loadReportCSS();
         $('body').append(_report);
+        _report.bind('click', reportClick); // Delegate
         _report
             .find('#jQA-CloseButton')
             .bind('click', closeReport);
@@ -323,11 +335,13 @@
 
     function updateSelectorPerformanceTable() {
         var html = '<table>';
-        html += '<thead><tr><th>Selector</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
+        html += '<thead><tr><th sortattr="selector">Selector</th><th sortattr="calls">Calls</th>' +
+                '<th sortattr="total">Total (ms)</th><th sortattr="average">Average (ms)</th></thead>';
         html += '<tbody>';
-        var length = Math.min(10, _selectors_sorted.length);
+        var ary = _ds.selectors.ary;
+        var length = Math.min(10, ary.length);
         for (var i = 0; i < length; i++) {
-            var row = _selectors_sorted[i];
+            var row = ary[i];
             html += '<tr>';
             html += '<td><code>' + row.selector + '</code></td>';
             html += '<td>' + row.calls + '</td>';
@@ -335,17 +349,21 @@
             html += '<td>' + row.average + '</td>';
             html += '</tr>';
         }
-        _report.find('#jQA-SelectorPerformance').html(html);
+        _selectorPerfContainer.html(html);
+        updateSortingHeader(_selectorPerfContainer, _ds.selectors.attr, _ds.selectors.dir);
+        //_report.find('#jQA-SelectorPerformance th[sortattr=' + _ds.selectors.attr + ']').addClass('sortingth');
     }
 
 
     function updateHandlerPerformanceTable() {
         var html = '<table>';
-        html += '<thead><tr><th>Selector</th><th>Event</th><th>Calls</th><th>Total (ms)</th><th>Average (ms)</th></thead>';
+        html += '<thead><tr><th sortattr="selector">Selector</th><th sortattr="type">Event</th>' +
+                '<th sortattr="calls">Calls</th><th sortattr="total">Total (ms)</th><th sortattr="average">Average (ms)</th></thead>';
         html += '<tbody>';
-        var length = Math.min(10, _events_sorted.length);
+        var ary = _ds.events.ary;
+        var length = Math.min(10, ary.length);
         for (var i = 0; i < length; i++) {
-            var row = _events_sorted[i];
+            var row = ary[i];
             html += '<tr>';
             html += '<td><code>' + row.selector + '</code></td>';
             html += '<td><code>' + row.type + '</code></td>';
@@ -354,7 +372,9 @@
             html += '<td>' + row.average + '</td>';
             html += '</tr>';
         }
-        _report.find('#jQA-EventPerformance').html(html);
+        _handlerPerfContainer.html(html);
+        updateSortingHeader(_handlerPerfContainer, _ds.events.attr, _ds.events.dir);
+        //_report.find('#jQA-EventPerformance th[sortattr=' + _ds.events.attr + ']').addClass('sortingth');
     }
 
 
@@ -368,11 +388,75 @@
     }
 
 
+    function reportClick(e) {
+        var th = $(e.target).closest('th');
+        if (!th || !th.length) {
+            return;
+        }
+        var attr = th.attr('sortattr');
+        if (attr) {
+            var type = th.closest('div')[0].id.indexOf("Event") > -1 ? 'events' : 'selectors';
+            updateSorting(attr, type);
+            updatePerformanceReport();
+        }
+    }
+
+    function sortedInsert(item, obj) {
+        var ary = obj.ary, attr = obj.attr, dir = obj.dir;
+        for (var i = 0; i < ary.length; i++) {
+            if ((dir === 1 && item[attr] <= ary[i][attr]) ||
+                (dir === -1 && item[attr] > ary[i][attr])) {
+                ary.splice(i, 0, item);
+                return;
+            }
+        }
+        // If we get here, item should be at the end of the array:
+        ary.push(item);
+    }
+
+
+    function updateSorting(newAttr, type) {
+        var ary = _ds[type].ary;
+        
+        if (newAttr === _ds[type].attr) {
+            _ds[type].dir *= -1;
+            ary.reverse();
+        } else {
+            var attr = _ds[type].attr = newAttr;
+            var dir = _ds[type].dir = (attr !== 'selector' && attr !== 'type') ? -1 : 1;
+            ary.sort(function(a, b) {
+                return (a[attr] < b[attr] ? -dir : dir);
+            });
+        }
+    }
+
+
+    function updateSortingHeader(container, attr, dir) {
+        $.analyze.disable();
+        var th = container.find('th[sortattr=' + attr + ']');
+        th.addClass('sortingth').siblings().removeClass('sortingth');
+        var ths = $(th).add(th.siblings());
+        ths.each(function() {
+            var currentTxt = $(this).text();
+            currentTxt = currentTxt.replace(/\s*[\u25BC\u25B2]\s+$/gi, '').replace(/\s+$/gi, '');
+            if ($(this).hasClass('sortingth')) {
+                currentTxt += '   ' + (dir === -1 ? '\u25BC' : '\u25B2');
+            }
+            $(this).text(currentTxt);
+        });
+        $.analyze.enable();
+    }
+
     $.analyze.subscribe('jqanalyze.trigger', function(e, subject) {
         // Store the intercepted handlers and sort by total time spent
         // executing
-        var item = $.grep(_events_sorted, function(n) {
-            return n.selector === subject.selector && n.type === subject.type;
+        var itemIndex = -1;
+        var item = $.grep(_ds.events.ary, function(n, i) {
+            if (n.selector === subject.selector && n.type === subject.type) {
+                itemIndex = i;
+                return true;
+            }
+            return false;
         })[0];
 
         if (!item) {
@@ -382,24 +466,27 @@
                 calls : 0,
                 total : 0
             };
-            _events_sorted.push(item);
+        } else {
+            _ds.events.ary.splice(itemIndex, 1);
         }
         
         item.calls += 1;
         item.total += subject.duration;
         item.average = Math.round(item.total / item.calls);
-
-        _events_sorted.sort(function(a, b) {
-            return a.total > b.total ? -1 : 1;
-        });
+        sortedInsert(item, _ds.events);
     });
 
 
     $.analyze.subscribe('jqanalyze.find', function(e, subject) {
         // Store the intercepted selectors and sort by total time spent finding
         // the elements.
-        var item = $.grep(_selectors_sorted, function(n) {
-            return n.selector === subject.selector;
+        var itemIndex = -1;
+        var item = $.grep(_ds.selectors.ary, function(n, i) {
+            if (n.selector === subject.selector) {
+                itemIndex = i;
+                return true;
+            }
+            return false;
         })[0];
 
         if (!item) {
@@ -408,16 +495,14 @@
                 calls : 0,
                 total : 0
             };
-            _selectors_sorted.push(item);
+        } else {
+            _ds.selectors.ary.splice(itemIndex, 1);
         }
         
         item.calls += 1;
         item.total += subject.duration;
         item.average = Math.round(item.total / item.calls);
-
-        _selectors_sorted.sort(function(a, b) {
-            return a.total > b.total ? -1 : 1;
-        });
+        sortedInsert(item, _ds.selectors);
     });
 
 
@@ -435,7 +520,7 @@
             function() { p.hide(); },
             function() { p.show(); }
         );
-        _report.find('#jQA-Warnings').append(item);
+        _warningContainer.append(item);
     });
 
 
